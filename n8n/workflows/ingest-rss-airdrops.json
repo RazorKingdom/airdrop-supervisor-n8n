@@ -1,0 +1,99 @@
+{
+  "name": "ingest-rss-airdrops",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 10,
+              "unit": "minutes"
+            }
+          ]
+        }
+      },
+      "name": "Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.RSS_FEED_URL}}"
+      },
+      "name": "RSS Read",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract minimal fields from RSS item\n// Expected output per item: { title, description, source_url, raw_urls }\n\nfunction extractUrls(text) {\n  if (!text) return [];\n  const regex = /https?:\\/\\/[^\\s)\"']+/g;\n  const m = text.match(regex);\n  return m ? Array.from(new Set(m)) : [];\n}\n\nreturn items.map((item) => {\n  const title = item.json.title ?? '';\n  const description = item.json.content ?? item.json.contentSnippet ?? item.json.description ?? '';\n  const sourceUrl = item.json.link ?? '';\n  const rawUrls = extractUrls(`${title}\n${description}\n${sourceUrl}`);\n  return { json: { title, description, source_url: sourceUrl, raw_urls: rawUrls } };\n});"
+      },
+      "name": "Extract Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dedupe + tagging helper (inline v1)\n\nconst TRACKING_PARAMS = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','ref'];\nconst SHORT_HOSTS = new Set(['t.co','bit.ly','tinyurl.com']);\n\nfunction normalizeUrl(url) {\n  const u = new URL(url);\n  u.hash = '';\n  for (const k of TRACKING_PARAMS) u.searchParams.delete(k);\n  // normalize to https when possible\n  if (u.protocol === 'http:') u.protocol = 'https:';\n  const s = u.toString();\n  return s.endsWith('/') ? s : s + '/';\n}\n\nfunction isLikelyShortLink(url) {\n  try {\n    const u = new URL(url);\n    return SHORT_HOSTS.has(u.hostname);\n  } catch {\n    return false;\n  }\n}\n\nfunction tagsFromText(text) {\n  const t = (text || '').toLowerCase();\n  const tags = [];\n  if (/(solana|\\bsol\\b)/.test(t)) tags.push('Chain:Solana');\n  if (/(ethereum|\\beth\\b)/.test(t)) tags.push('Chain:Ethereum');\n  if (/testnet|faucet/.test(t)) tags.push('Type:Testnet');\n  if (/stake|staking|deposit/.test(t)) tags.push('Type:Stake');\n  if (/defi|swap|dex/.test(t)) tags.push('Sector:DeFi');\n  if (/gamefi|game|guild/.test(t)) tags.push('Sector:GameFi');\n  if (/airdrop/.test(t)) tags.push('Signal:Airdrop');\n  return Array.from(new Set(tags));\n}\n\nreturn items\n  .map((item) => {\n    const title = String(item.json.title ?? '').trim();\n    const description = String(item.json.description ?? '').trim();\n    const sourceUrl = String(item.json.source_url ?? '').trim();\n    const rawUrls = Array.isArray(item.json.raw_urls) ? item.json.raw_urls : [];\n\n    const text = `${title}\\n${description}\\n${sourceUrl}`;\n    const candidate = rawUrls.find((u) => !isLikelyShortLink(u));\n\n    if (!candidate) return null;\n\n    let projectUrl;\n    try {\n      projectUrl = normalizeUrl(candidate);\n    } catch {\n      return null;\n    }\n\n    return {\n      json: {\n        title: title || projectUrl,\n        description: description || title || '',\n        source_url: sourceUrl || projectUrl,\n        project_url: projectUrl,\n        tags: tagsFromText(text),\n        status: 'active'\n      }\n    };\n  })\n  .filter(Boolean);"
+      },
+      "name": "Normalize + Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Cron": {
+      "main": [
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "Extract Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Fields": {
+      "main": [
+        [
+          {
+            "node": "Normalize + Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "versionId": "",
+  "id": ""
+}

@@ -1,0 +1,69 @@
+{
+  "name": "ingest-telegram-airdrops",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract minimal fields from Telegram message\n\nfunction extractUrls(text) {\n  if (!text) return [];\n  const regex = /https?:\\/\\/[^\\s)\"']+/g;\n  const m = text.match(regex);\n  return m ? Array.from(new Set(m)) : [];\n}\n\nreturn items.map((item) => {\n  const msg = item.json.message ?? {};\n  const text = String(msg.text ?? '');\n  const title = text.split(/\n/)[0] || 'Telegram signal';\n  const description = text;\n  const sourceUrl = '';\n  const rawUrls = extractUrls(text);\n  return { json: { title, description, source_url: sourceUrl, raw_urls: rawUrls } };\n});"
+      },
+      "name": "Extract Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize + tags (inline v1, same rules as RSS workflow)\n\nconst TRACKING_PARAMS = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','ref'];\nconst SHORT_HOSTS = new Set(['t.co','bit.ly','tinyurl.com']);\n\nfunction normalizeUrl(url) {\n  const u = new URL(url);\n  u.hash = '';\n  for (const k of TRACKING_PARAMS) u.searchParams.delete(k);\n  if (u.protocol === 'http:') u.protocol = 'https:';\n  const s = u.toString();\n  return s.endsWith('/') ? s : s + '/';\n}\n\nfunction isLikelyShortLink(url) {\n  try {\n    const u = new URL(url);\n    return SHORT_HOSTS.has(u.hostname);\n  } catch {\n    return false;\n  }\n}\n\nfunction tagsFromText(text) {\n  const t = (text || '').toLowerCase();\n  const tags = [];\n  if (/(solana|\\bsol\\b)/.test(t)) tags.push('Chain:Solana');\n  if (/(ethereum|\\beth\\b)/.test(t)) tags.push('Chain:Ethereum');\n  if (/testnet|faucet/.test(t)) tags.push('Type:Testnet');\n  if (/stake|staking|deposit/.test(t)) tags.push('Type:Stake');\n  if (/defi|swap|dex/.test(t)) tags.push('Sector:DeFi');\n  if (/gamefi|game|guild/.test(t)) tags.push('Sector:GameFi');\n  if (/airdrop/.test(t)) tags.push('Signal:Airdrop');\n  return Array.from(new Set(tags));\n}\n\nreturn items\n  .map((item) => {\n    const title = String(item.json.title ?? '').trim();\n    const description = String(item.json.description ?? '').trim();\n    const sourceUrl = String(item.json.source_url ?? '').trim();\n    const rawUrls = Array.isArray(item.json.raw_urls) ? item.json.raw_urls : [];\n\n    const text = `${title}\\n${description}\\n${sourceUrl}`;\n    const candidate = rawUrls.find((u) => !isLikelyShortLink(u));\n    if (!candidate) return null;\n\n    let projectUrl;\n    try {\n      projectUrl = normalizeUrl(candidate);\n    } catch {\n      return null;\n    }\n\n    return {\n      json: {\n        title: title || projectUrl,\n        description: description || title || '',\n        source_url: sourceUrl || projectUrl,\n        project_url: projectUrl,\n        tags: tagsFromText(text),\n        status: 'active'\n      }\n    };\n  })\n  .filter(Boolean);"
+      },
+      "name": "Normalize + Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Fields": {
+      "main": [
+        [
+          {
+            "node": "Normalize + Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "versionId": "",
+  "id": ""
+}
