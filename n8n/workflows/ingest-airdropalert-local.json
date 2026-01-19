@@ -1,0 +1,196 @@
+{
+    "name": "ingest-airdropalert-local",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "minutes",
+                            "minutesInterval": 15
+                        }
+                    ]
+                }
+            },
+            "name": "Schedule",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [
+                260,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://airdropalert.com/feed"
+            },
+            "name": "RSS Read",
+            "type": "n8n-nodes-base.rssFeedRead",
+            "typeVersion": 1,
+            "position": [
+                480,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "function extractUrls(text) {\n  if (!text) return [];\n  const regex = /https?:\\/\\/[^\\s)\"'<>]+/g;\n  const m = text.match(regex);\n  return m ? Array.from(new Set(m)) : [];\n}\n\nreturn items.map((item) => {\n  const title = item.json.title ?? '';\n  const description = item.json.content ?? item.json.contentSnippet ?? item.json.description ?? '';\n  const sourceUrl = item.json.link ?? '';\n  const rawUrls = extractUrls(`${title}\\n${description}\\n${sourceUrl}`);\n  return { json: { title, description, source_url: sourceUrl, raw_urls: rawUrls } };\n});"
+            },
+            "name": "Extract Fields",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                700,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const TRACKING_PARAMS = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','ref'];\nconst SHORT_HOSTS = new Set(['t.co','bit.ly','tinyurl.com','goo.gl','ow.ly','is.gd','buff.ly']);\n\nfunction normalizeUrl(url) {\n  const u = new URL(url);\n  u.hash = '';\n  for (const k of TRACKING_PARAMS) u.searchParams.delete(k);\n  if (u.protocol === 'http:') u.protocol = 'https:';\n  const s = u.toString();\n  return s.endsWith('/') ? s : s + '/';\n}\n\nfunction isLikelyShortLink(url) {\n  try {\n    const u = new URL(url);\n    return SHORT_HOSTS.has(u.hostname.replace(/^www\\./, ''));\n  } catch {\n    return true;\n  }\n}\n\nfunction tagsFromText(text) {\n  const t = (text || '').toLowerCase();\n  const tags = [];\n  \n  if (/\\bsolana\\b|\\$sol\\b/.test(t)) tags.push('Chain:Solana');\n  if (/\\bethereum\\b|\\$eth\\b/.test(t)) tags.push('Chain:Ethereum');\n  if (/\\barbitrum\\b|\\$arb\\b/.test(t)) tags.push('Chain:Arbitrum');\n  if (/\\bpolygon\\b|\\$matic\\b/.test(t)) tags.push('Chain:Polygon');\n  if (/\\bbase\\s*(chain|network|mainnet|testnet)\\b|coinbase\\s*base\\b/.test(t)) tags.push('Chain:Base');\n  if (/\\boptimism\\b|\\$op\\b/.test(t)) tags.push('Chain:Optimism');\n  if (/zksync|zk\\s*sync/i.test(t)) tags.push('Chain:zkSync');\n  if (/\\bsui\\s*(network|chain|mainnet|testnet)?\\b/.test(t)) tags.push('Chain:Sui');\n  if (/\\baptos\\b|\\$apt\\b/.test(t)) tags.push('Chain:Aptos');\n  if (/\\bbnb\\s*chain|binance\\s*smart/i.test(t)) tags.push('Chain:BNB');\n  if (/\\bavax|avalanche/i.test(t)) tags.push('Chain:Avalanche');\n  \n  if (/testnet|faucet/.test(t)) tags.push('Type:Testnet');\n  if (/mainnet\\s*(launch|live|deploy)/.test(t)) tags.push('Type:Mainnet');\n  if (/\\bstake|staking|deposit/.test(t)) tags.push('Type:Stake');\n  if (/\\bnft\\b|\\bmint\\b/.test(t)) tags.push('Type:NFT');\n  \n  if (/\\bdefi\\b|\\bswap\\b|\\bdex\\b|\\blend\\b|\\bborrow\\b/.test(t)) tags.push('Sector:DeFi');\n  if (/gamefi|play.?to.?earn|p2e|\\bguild\\b/.test(t)) tags.push('Sector:GameFi');\n  if (/socialfi|social.?fi|\\bfarcaster\\b|\\blens\\b/.test(t)) tags.push('Sector:SocialFi');\n  if (/layer.?2|\\bl2\\b|rollup/.test(t)) tags.push('Sector:Layer2');\n  \n  if (/\\bairdrop\\b/.test(t)) tags.push('Signal:Airdrop');\n  if (/retroactive|retrodrop/.test(t)) tags.push('Signal:Retroactive');\n  if (/confirmed\\s*(airdrop)?/.test(t)) tags.push('Signal:Confirmed');\n  if (/potential|speculated|rumor/.test(t)) tags.push('Signal:Potential');\n  if (/token\\s*launch|tge\\b/.test(t)) tags.push('Signal:TokenLaunch');\n  \n  return Array.from(new Set(tags));\n}\n\nfunction truncate(s, maxLen) {\n  const str = String(s || '').trim();\n  return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;\n}\n\nreturn items\n  .map((item) => {\n    const title = truncate(item.json.title, 500);\n    const description = truncate(item.json.description, 5000);\n    const sourceUrl = String(item.json.source_url ?? '').trim();\n    const rawUrls = Array.isArray(item.json.raw_urls) ? item.json.raw_urls : [];\n\n    const text = `${title}\\n${description}\\n${sourceUrl}`;\n    const candidate = rawUrls.find((u) => !isLikelyShortLink(u));\n\n    if (!candidate) return null;\n\n    let projectUrl;\n    try {\n      projectUrl = normalizeUrl(candidate);\n    } catch {\n      return null;\n    }\n\n    return {\n      json: {\n        title: title || projectUrl,\n        description: description || title || '',\n        source_url: sourceUrl || projectUrl,\n        project_url: projectUrl,\n        tags: tagsFromText(text),\n        status: 'active'\n      }\n    };\n  })\n  .filter(Boolean);"
+            },
+            "name": "Normalize + Tags",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                920,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{$env.POSTGREST_URL}}/airdrops",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Prefer",
+                            "value": "resolution=merge-duplicates"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "title",
+                            "value": "={{$json.title}}"
+                        },
+                        {
+                            "name": "description",
+                            "value": "={{$json.description}}"
+                        },
+                        {
+                            "name": "source_url",
+                            "value": "={{$json.source_url}}"
+                        },
+                        {
+                            "name": "project_url",
+                            "value": "={{$json.project_url}}"
+                        },
+                        {
+                            "name": "tags",
+                            "value": "={{$json.tags}}"
+                        },
+                        {
+                            "name": "status",
+                            "value": "={{$json.status}}"
+                        }
+                    ]
+                },
+                "options": {
+                    "batching": {
+                        "batch": {
+                            "batchSize": 10,
+                            "batchInterval": 1000
+                        }
+                    }
+                }
+            },
+            "name": "Upsert to PostgREST",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1140,
+                300
+            ],
+            "continueOnFail": true
+        },
+        {
+            "parameters": {
+                "jsCode": "const success = items.filter(i => !i.error).length;\nconst failed = items.filter(i => i.error).length;\nconsole.log(`AirdropAlert: ${success} success, ${failed} failed`);\nreturn [{ json: { source: 'AirdropAlert', timestamp: new Date().toISOString(), success_count: success, failed_count: failed, total: items.length } }];"
+            },
+            "name": "Log Summary",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1360,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Schedule": {
+            "main": [
+                [
+                    {
+                        "node": "RSS Read",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "RSS Read": {
+            "main": [
+                [
+                    {
+                        "node": "Extract Fields",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Fields": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize + Tags",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalize + Tags": {
+            "main": [
+                [
+                    {
+                        "node": "Upsert to PostgREST",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Upsert to PostgREST": {
+            "main": [
+                [
+                    {
+                        "node": "Log Summary",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "versionId": "",
+    "id": ""
+}
