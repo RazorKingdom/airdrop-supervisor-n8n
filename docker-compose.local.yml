@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: airdrop-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-airdrop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airdrop_secret_2024}
+      POSTGRES_DB: ${POSTGRES_DB:-airdrops}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./supabase/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-airdrop} -d ${POSTGRES_DB:-airdrops}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - airdrop-network
+
+  # PostgREST - Auto-generate REST API from PostgreSQL
+  postgrest:
+    image: postgrest/postgrest:v12.0.2
+    container_name: airdrop-postgrest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://${POSTGRES_USER:-airdrop}:${POSTGRES_PASSWORD:-airdrop_secret_2024}@postgres:5432/${POSTGRES_DB:-airdrops}
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: ${POSTGRES_USER:-airdrop}
+      PGRST_SERVER_PORT: 3000
+      PGRST_OPENAPI_SERVER_PROXY_URI: http://localhost:3000
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - airdrop-network
+
+  # n8n Workflow Automation
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: airdrop-n8n
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-admin123}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=Asia/Shanghai
+      # Database connection for n8n workflows
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-airdrops}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER:-airdrop}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-airdrop_secret_2024}
+      # Environment variables for workflows
+      - RSS_FEED_URL=${RSS_FEED_URL:-https://airdrops.io/feed/}
+      - POSTGREST_URL=http://postgrest:3000
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/home/node/workflows:ro
+    ports:
+      - "5678:5678"
+    networks:
+      - airdrop-network
+
+volumes:
+  postgres_data:
+  n8n_data:
+
+networks:
+  airdrop-network:
+    driver: bridge

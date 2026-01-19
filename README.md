@@ -98,7 +98,62 @@ The n8n workflow automatically generates tags based on content:
 | **Sector** | `Sector:DeFi`, `Sector:GameFi`, `Sector:SocialFi`, `Sector:Layer2`             |
 | **Signal** | `Signal:Airdrop`, `Signal:Retroactive`, `Signal:Confirmed`, `Signal:Potential` |
 
-## Server Deployment
+## 🏠 Self-Hosted Deployment (Fully Local)
+
+**No external services required!** Everything runs on your server.
+
+### One-Click Deploy
+
+```bash
+# Clone the repo
+git clone https://github.com/RazorKingdom/airdrop-supervisor-n8n.git /opt/airdrop-supervisor
+cd /opt/airdrop-supervisor
+
+# Run deployment script
+chmod +x scripts/deploy.sh
+sudo ./scripts/deploy.sh
+```
+
+This installs and configures:
+- **PostgreSQL** - Database (local)
+- **PostgREST** - Auto-generate REST API
+- **n8n** - Workflow automation
+- **Nginx** - Reverse proxy
+
+### Access After Deployment
+
+| Service  | URL                               |
+| -------- | --------------------------------- |
+| Frontend | `http://your-server/`             |
+| n8n      | `http://your-server:5678/`        |
+| API      | `http://your-server/api/airdrops` |
+
+### Architecture
+
+```
+┌───────────┐    ┌───────────┐    ┌────────────┐
+│  Nginx    │◄───│ Frontend  │    │    n8n     │
+│   :80     │    │  静态文件  │    │   :5678    │
+└─────┬─────┘    └───────────┘    └──────┬─────┘
+      │ /api/*                           │
+      ▼                                  ▼
+┌───────────┐                    ┌────────────┐
+│ PostgREST │◄───────────────────│ PostgreSQL │
+│   :3000   │                    │   :5432    │
+└───────────┘                    └────────────┘
+```
+
+### Resource Requirements
+
+| Resource | Minimum | Recommended |
+| -------- | ------- | ----------- |
+| RAM      | 1 GB    | 2 GB        |
+| Disk     | 5 GB    | 10 GB       |
+| CPU      | 1 core  | 2 cores     |
+
+---
+
+## Server Deployment (Cloud Supabase)
 
 ### Quick Install (Ubuntu/Debian)
 
