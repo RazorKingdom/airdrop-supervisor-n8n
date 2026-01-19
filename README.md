@@ -67,6 +67,59 @@ supabase start && supabase db reset
 - Avoid committing secrets. Use env vars / local config.
 - Frontend must be resilient (works without Supabase).
 
+## Server Deployment
+
+### Quick Install (Ubuntu/Debian)
+
+```bash
+# Clone the repo
+git clone <your-repo-url> /opt/airdrop-supervisor
+cd /opt/airdrop-supervisor
+
+# Run installation script
+chmod +x scripts/install.sh
+sudo ./scripts/install.sh
+```
+
+The script will:
+1. Install Docker, Node.js, and Nginx
+2. Create `.env` file with generated encryption key
+3. Configure Nginx to serve the frontend
+4. Create systemd service for n8n
+
+### Post-Installation
+
+1. **Configure Supabase credentials:**
+   ```bash
+   sudo nano /opt/airdrop-supervisor/.env
+   ```
+
+2. **Update frontend config:**
+   ```bash
+   nano /opt/airdrop-supervisor/web/app.js
+   # Set CONFIG.SUPABASE_URL and CONFIG.SUPABASE_ANON_KEY
+   ```
+
+3. **Apply database migration in Supabase SQL Editor**
+
+4. **Start services:**
+   ```bash
+   sudo systemctl start airdrop-n8n
+   sudo systemctl enable airdrop-n8n
+   ```
+
+5. **Import workflow in n8n UI** (http://your-server:5678)
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `N8N_ENCRYPTION_KEY` | n8n encryption key (auto-generated) |
+| `RSS_FEED_URL` | RSS feed to ingest (default: airdrops.io) |
+| `SUPABASE_URL` | Your Supabase project URL |
+| `SUPABASE_ANON_KEY` | Supabase anon/public key |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key |
+
 ## License
 
 TBD
