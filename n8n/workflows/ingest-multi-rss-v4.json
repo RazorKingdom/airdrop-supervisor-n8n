@@ -1,0 +1,104 @@
+{
+  "name": "ingest-multi-rss-parallel",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "minutes", "minutesInterval": 15}]
+        }
+      },
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://airdrops.io/feed/"
+      },
+      "name": "RSS Airdrops.io",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://airdropalert.com/feed/"
+      },
+      "name": "RSS AirdropAlert",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [500, 400]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process RSS items\n\nfunction normalizeUrl(url) {\n  try {\n    const u = new URL(url);\n    u.hash = '';\n    ['utm_source','utm_medium','utm_campaign','ref'].forEach(k => u.searchParams.delete(k));\n    return u.toString().replace(/\\/?$/, '/');\n  } catch { return url; }\n}\n\nfunction tagsFromText(t) {\n  t = (t || '').toLowerCase();\n  const tags = [];\n  if (/solana|\\$sol/.test(t)) tags.push('Chain:Solana');\n  if (/ethereum|\\$eth/.test(t)) tags.push('Chain:Ethereum');\n  if (/arbitrum/.test(t)) tags.push('Chain:Arbitrum');\n  if (/polygon|matic/.test(t)) tags.push('Chain:Polygon');\n  if (/base chain|base network/.test(t)) tags.push('Chain:Base');\n  if (/optimism/.test(t)) tags.push('Chain:Optimism');\n  if (/zksync/.test(t)) tags.push('Chain:zkSync');\n  if (/\\bsui\\b/.test(t)) tags.push('Chain:Sui');\n  if (/aptos/.test(t)) tags.push('Chain:Aptos');\n  if (/bnb|binance/.test(t)) tags.push('Chain:BNB');\n  if (/testnet|faucet/.test(t)) tags.push('Type:Testnet');\n  if (/mainnet/.test(t)) tags.push('Type:Mainnet');\n  if (/stake|staking/.test(t)) tags.push('Type:Stake');\n  if (/\\bnft\\b/.test(t)) tags.push('Type:NFT');\n  if (/defi|swap|dex/.test(t)) tags.push('Sector:DeFi');\n  if (/gamefi/.test(t)) tags.push('Sector:GameFi');\n  if (/layer.?2|\\bl2\\b/.test(t)) tags.push('Sector:Layer2');\n  if (/airdrop/.test(t)) tags.push('Signal:Airdrop');\n  if (/retroactive/.test(t)) tags.push('Signal:Retroactive');\n  return tags.length ? tags : ['Signal:Airdrop'];\n}\n\nfunction stripHtml(h) { return (h||'').replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim(); }\nfunction truncate(s,n) { s=String(s||'').trim(); return s.length>n ? s.slice(0,n)+'...' : s; }\n\nreturn items.map(item => {\n  const title = truncate(item.json.title, 500);\n  const desc = truncate(stripHtml(item.json.content || item.json.description || ''), 2000);\n  const src = item.json.link || '';\n  if (!src) return null;\n  return {\n    json: {\n      title: title || 'Untitled',\n      description: desc || title,\n      source_url: src,\n      project_url: normalizeUrl(src),\n      tags: tagsFromText(title + ' ' + desc),\n      status: 'active'\n    }\n  };\n}).filter(Boolean);"
+      },
+      "name": "Process Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.POSTGREST_URL}}/airdrops",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "Prefer", "value": "resolution=merge-duplicates"}
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "title", "value": "={{$json.title}}"},
+            {"name": "description", "value": "={{$json.description}}"},
+            {"name": "source_url", "value": "={{$json.source_url}}"},
+            {"name": "project_url", "value": "={{$json.project_url}}"},
+            {"name": "tags", "value": "={{$json.tags}}"},
+            {"name": "status", "value": "={{$json.status}}"}
+          ]
+        }
+      },
+      "name": "Upsert to PostgREST",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 300],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [
+          {"node": "RSS Airdrops.io", "type": "main", "index": 0},
+          {"node": "RSS AirdropAlert", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "RSS Airdrops.io": {
+      "main": [[{"node": "Merge", "type": "main", "index": 0}]]
+    },
+    "RSS AirdropAlert": {
+      "main": [[{"node": "Merge", "type": "main", "index": 1}]]
+    },
+    "Merge": {
+      "main": [[{"node": "Process Items", "type": "main", "index": 0}]]
+    },
+    "Process Items": {
+      "main": [[{"node": "Upsert to PostgREST", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false
+}
